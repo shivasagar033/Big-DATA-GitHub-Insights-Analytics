@@ -1,0 +1,53 @@
+name: AWS Resource Creation 
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  Deploy_CFT:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+
+      - name: Upload Script to S3 Bucket
+        run: |
+          aws s3 cp .github/workflows/Datawarehouse_script.py s3://scriftfile/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+      - name: Deploy CloudFormation stack
+        run: |
+          aws cloudformation deploy \
+            --stack-name CFTStack \
+            --template-file .github/workflows/cft.yml \
+            --parameter-overrides "NumberOfWorkers=${{ vars.NUMBEROFWORKERS }}" \
+                                  "MaxRetries=${{ vars.MAXRETRIES }}" \
+                                  "Timeout=${{ vars.TIMEOUT }}" \
+                                  "WorkerType=${{ vars.WORKERTYPE }}" \
+                                  "GlueVersion=${{ vars.GLUEVERSION }}" \
+                                  "MaxConcurrentRuns=${{ vars.MAXCONCURRENTRUNS }}" \
+                                  "BytesScannedCutoffPerQuery=${{ vars.BYTESSCANNEDCUTOFFPERQUERY }}" \
+            --capabilities CAPABILITY_IAM
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+      
+      - name: Upload Script to S3 Bucket
+        run: |
+          aws s3 cp .github/workflows/Datawarehouse_script.py s3://pythonscriptfile-grp4/
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          AWS_DEFAULT_REGION: ${{ vars.AWS_DEFAULT_REGION }}
+          AWS_SESSION_TOKEN: ${{ secrets.AWS_SESSION_TOKEN }}
+
+

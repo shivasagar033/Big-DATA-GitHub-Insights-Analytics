@@ -1,0 +1,167 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Create an aws resources"
+
+Parameters:
+  NumberOfWorkers:
+    Type: Number
+    Description: Number of workers for the Glue job
+
+  MaxRetries:
+    Type: Number
+    Description: MaxRetries for the Glue job
+
+  Timeout:
+    Type: Number
+    Description: Timeout for the Glue job
+
+  WorkerType:
+    Type: String
+    Description: Glue worker type for the job
+
+  GlueVersion:
+    Type: String
+    Description: GlueVersion for the job
+
+  MaxConcurrentRuns:
+    Type: Number
+    Description: MaxConcurrentRuns for the workflow
+
+  BytesScannedCutoffPerQuery:
+    Type: Number
+    Description: BytesScannedCutoffPerQuery for the Athena workgroup
+
+Resources:
+  MyS3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: datalake-rawzone-grp04
+  
+  MyS3Bucket1:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: output-grp04
+
+  DumpingBucket:
+    Type: AWS::S3::Bucket
+    DependsOn: LambdaInvokePermission
+    Properties:
+      BucketName: pythonscriptfile-grp4
+      NotificationConfiguration:
+        LambdaConfigurations:
+          - Event: s3:ObjectCreated:*
+            Function: !GetAtt LambdaFunction.Arn
+
+  GlueDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Ref AWS::AccountId
+      DatabaseInput:
+        Name: datawarehouse-grp04
+
+  WorkflowJob:
+    Type: AWS::Glue::Workflow
+    Properties:
+      Description: Create workflow
+      MaxConcurrentRuns: !Ref MaxConcurrentRuns
+      Name: automationworkflow-grp04
+
+  GlueJobImport:
+    Type: AWS::Glue::Job
+    DependsOn: MyS3Bucket
+    Properties:
+      Name: data-pipeline-ingest-grp04
+      Description: Ingests data from s3 and writes it as a parquet file to the data lake
+      ExecutionClass: FLEX
+      GlueVersion: !Ref GlueVersion
+      MaxRetries: !Ref MaxRetries
+      NumberOfWorkers: !Ref NumberOfWorkers
+      Role: arn:aws:iam::517977851664:role/LabRole
+      Timeout: !Ref Timeout
+      WorkerType: !Ref WorkerType
+      Command:
+        Name: glueetl
+        ScriptLocation: s3://scriftfile/Datawarehouse_script.py
+
+  GlueCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      Name: metadatacrawlergrp04
+      DatabaseName: !Ref GlueDatabase
+      Targets:
+        S3Targets:
+          - Path: s3://datalake-rawzone-grp04/datalake-8-sep/
+      Role: arn:aws:iam::517977851664:role/LabRole
+
+  LambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        ZipFile: |
+          import json
+          import boto3
+
+          def lambda_handler(event, context):
+              glue = boto3.client('glue')
+              response = glue.start_workflow_run(Name='automationworkflow-grp04')
+              print(response)
+              return {
+                  'statusCode': 200,
+                  'body': json.dumps('Hello from AWS Lambda!')
+              }
+
+      Handler: index.lambda_handler
+      Role: arn:aws:iam::517977851664:role/LabRole
+      Runtime: python3.11
+      FunctionName: "LambdaforWorkflow"
+
+  LambdaInvokePermission:
+    Type: AWS::Lambda::Permission
+    DependsOn: LambdaFunction
+    Properties:
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Action: lambda:InvokeFunction
+      Principal: "s3.amazonaws.com"
+      SourceAccount: !Ref AWS::AccountId
+      SourceArn: "arn:aws:s3:::pythonscriptfile-grp4"
+
+  WorkflowStartTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: StartTrigger
+      Type: ON_DEMAND
+      Description: Trigger for starting the workflow
+      Actions:
+        - JobName: !Ref GlueJobImport
+      WorkflowName: !Ref WorkflowJob
+
+  CrawlerJobTrigger:
+    Type: AWS::Glue::Trigger
+    Properties:
+      Name: jobsuccesfultrigger1
+      Type: CONDITIONAL
+      StartOnCreation: TRUE
+      Description: Trigger to start the crawler
+      Actions:
+        - CrawlerName: !Ref GlueCrawler
+      Predicate:
+        Conditions:
+          - LogicalOperator: EQUALS
+            JobName: !Ref GlueJobImport
+            State: SUCCEEDED
+      WorkflowName: !Ref WorkflowJob
+
+  MyAthenaWorkGroup:
+    Type: AWS::Athena::WorkGroup
+    Properties:
+      Name: datawarehouseworkgroup-grp04
+      Description: workgroup for Athena
+      State: ENABLED
+      WorkGroupConfiguration:
+        BytesScannedCutoffPerQuery: !Ref BytesScannedCutoffPerQuery
+        EnforceWorkGroupConfiguration: false
+        PublishCloudWatchMetricsEnabled: true
+        RequesterPaysEnabled: true
+        ResultConfiguration:
+          OutputLocation: s3://output-grp04/
